@@ -1,0 +1,15 @@
+node_modules/
+.expo/
+dist/
+web-build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+.DS_Store
+*.zip
+scratch/
+ios27-design-system-main/
+liquid-glass-main/
