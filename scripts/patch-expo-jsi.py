@@ -208,11 +208,11 @@ public:
 
   RuntimeScheduler() {}
 
-  static SWIFT_RETURNS_RETAINED RuntimeScheduler *create(void *scheduler, ScheduleFn fn) noexcept {
+  static SWIFT_RETURNS_RETAINED RuntimeScheduler *_Nonnull create(void *scheduler, ScheduleFn fn) noexcept {
     return new RuntimeScheduler(scheduler, fn);
   }
 
-  static SWIFT_RETURNS_RETAINED RuntimeScheduler *create() {
+  static SWIFT_RETURNS_RETAINED RuntimeScheduler *_Nonnull create() {
     return new RuntimeScheduler();
   }
 
@@ -274,7 +274,7 @@ public:
 
   explicit HostFunctionClosure(Context context, Closure closure, Deallocator deallocator) : RetainedSwiftPointer(context, deallocator), _closure(closure) {};
 
-  static SWIFT_RETURNS_UNRETAINED HostFunctionClosure *create(Context context, Closure closure, Deallocator deallocator) {
+  static HostFunctionClosure *_Nonnull create(Context context, Closure closure, Deallocator deallocator) {
     return new HostFunctionClosure(context, closure, deallocator);
   }
 
