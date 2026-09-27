@@ -65,6 +65,10 @@ if os.path.exists(js_runtime):
         'name.wholeMatch(of: /^[a-zA-Z_$][a-zA-Z0-9_$]*$/) == nil',
         'name.range(of: "^[a-zA-Z_$][a-zA-Z0-9_$]*$", options: .regularExpression) == nil'
     )
+    # Fix RuntimeScheduler and HostFunctionClosure construction via static factory methods
+    content = content.replace('self.scheduler = expo.RuntimeScheduler()', 'self.scheduler = expo.RuntimeScheduler.create()')
+    content = content.replace('self.scheduler = expo.RuntimeScheduler(scheduler, fn)', 'self.scheduler = expo.RuntimeScheduler.create(scheduler, fn)')
+    content = content.replace('return expo.HostFunctionClosure(context, call, deallocate)', 'return expo.HostFunctionClosure.create(context, call, deallocate)')
     if content != orig:
         open(js_runtime, 'w', encoding='utf-8').write(content)
         print(f"  Fixed syntax in: {js_runtime}")
@@ -199,10 +203,18 @@ private:
   std::atomic<int> refCount{1};
 
 public:
-  SWIFT_RETURNS_RETAINED RuntimeScheduler(void *scheduler, ScheduleFn fn) noexcept
+  RuntimeScheduler(void *scheduler, ScheduleFn fn) noexcept
       : nativeScheduler(scheduler), scheduleFn(fn) {}
 
-  SWIFT_RETURNS_RETAINED RuntimeScheduler() {}
+  RuntimeScheduler() {}
+
+  static SWIFT_RETURNS_RETAINED RuntimeScheduler *create(void *scheduler, ScheduleFn fn) noexcept {
+    return new RuntimeScheduler(scheduler, fn);
+  }
+
+  static SWIFT_RETURNS_RETAINED RuntimeScheduler *create() {
+    return new RuntimeScheduler();
+  }
 
   RuntimeScheduler(const RuntimeScheduler &) = delete;
 
@@ -260,7 +272,11 @@ class SWIFT_IMMORTAL_REFERENCE HostFunctionClosure final : public RetainedSwiftP
 public:
   using Closure = bool(Context context, const facebook::jsi::Value *_Nonnull thisValue, const facebook::jsi::Value *_Nonnull args, size_t count, facebook::jsi::Value *_Nonnull result);
 
-  SWIFT_RETURNS_UNRETAINED explicit HostFunctionClosure(Context context, Closure closure, Deallocator deallocator) : RetainedSwiftPointer(context, deallocator), _closure(closure) {};
+  explicit HostFunctionClosure(Context context, Closure closure, Deallocator deallocator) : RetainedSwiftPointer(context, deallocator), _closure(closure) {};
+
+  static SWIFT_RETURNS_UNRETAINED HostFunctionClosure *create(Context context, Closure closure, Deallocator deallocator) {
+    return new HostFunctionClosure(context, closure, deallocator);
+  }
 
   virtual ~HostFunctionClosure() {
     _deallocator(_context);
