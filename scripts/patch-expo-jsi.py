@@ -57,8 +57,9 @@ if os.path.exists(js_runtime):
     content = open(js_runtime, 'r', encoding='utf-8').read()
     orig = content
     content = content.replace('_ arguments: consuming JavaScriptValuesBuffer,', '_ arguments: consuming JavaScriptValuesBuffer')
-    # Restore vector.push_back(consuming:) for move-only PropNameID
-    content = content.replace('vector.push_back(propNameId)', 'vector.push_back(consuming: propNameId)')
+    # Use Swift 'consume' operator to move propNameId without extraneous label
+    content = content.replace('vector.push_back(propNameId)', 'vector.push_back(consume propNameId)')
+    content = content.replace('vector.push_back(consuming: propNameId)', 'vector.push_back(consume propNameId)')
     # Fix regex literal syntax parsing error on Swift 6
     content = content.replace(
         'name.wholeMatch(of: /^[a-zA-Z_$][a-zA-Z0-9_$]*$/) == nil',
@@ -158,32 +159,126 @@ if os.path.exists(js_error):
         open(js_error, 'w', encoding='utf-8').write(content)
         print(f"  Fixed CppError extension in: {js_error}")
 
-# 8. Fix RuntimeScheduler.h for Xcode 16.2
+# 8. Fix RuntimeScheduler.h for Swift C++ shared reference interop
 sched = os.path.join('node_modules', 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI-Cxx', 'include', 'RuntimeScheduler.h')
 if os.path.exists(sched):
-    content = open(sched, 'r', encoding='utf-8').read()
-    orig = content
-    content = content.replace('SWIFT_RETURNS_RETAINED ', '')
-    content = content.replace('class SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler) RuntimeScheduler {', 'class RuntimeScheduler {')
-    if '} SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler);' not in content:
-        content = content.replace('};\n\n} // namespace expo', '} SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler);\n\n} // namespace expo')
-        content = content.replace('};\n} // namespace expo', '} SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler);\n\n} // namespace expo')
-    if content != orig:
-        open(sched, 'w', encoding='utf-8').write(content)
-        print(f"  Fixed attributes in: {sched}")
+    sched_content = """#pragma once
 
-# 9. Fix HostFunctionClosure.h (restore original immortal reference)
+#ifdef __cplusplus
+
+#include <atomic>
+#include <swift/bridging>
+
+namespace expo {
+class RuntimeScheduler;
+}
+
+inline void retainRuntimeScheduler(expo::RuntimeScheduler *scheduler);
+inline void releaseRuntimeScheduler(expo::RuntimeScheduler *scheduler);
+
+namespace expo {
+
+class SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler) RuntimeScheduler {
+public:
+  enum class Priority : int {
+    ImmediatePriority = 1,
+    UserBlockingPriority = 2,
+    NormalPriority = 3,
+    LowPriority = 4,
+    IdlePriority = 5,
+  };
+
+  using ScheduleTaskCallback = void(^)();
+
+  using ScheduleFn = void (*)(void *nativeScheduler, int priority, ScheduleTaskCallback callback);
+
+private:
+  void *const nativeScheduler{nullptr};
+  const ScheduleFn scheduleFn{nullptr};
+
+  std::atomic<int> refCount{1};
+
+public:
+  SWIFT_RETURNS_RETAINED RuntimeScheduler(void *scheduler, ScheduleFn fn) noexcept
+      : nativeScheduler(scheduler), scheduleFn(fn) {}
+
+  SWIFT_RETURNS_RETAINED RuntimeScheduler() {}
+
+  RuntimeScheduler(const RuntimeScheduler &) = delete;
+
+  bool supportsAsyncScheduling() const noexcept {
+    return scheduleFn != nullptr;
+  }
+
+  void scheduleTask(Priority priority, ScheduleTaskCallback callback) noexcept {
+    if (scheduleFn != nullptr) {
+      scheduleFn(nativeScheduler, static_cast<int>(priority), callback);
+    } else {
+      callback();
+    }
+  }
+
+  void retain() {
+    refCount.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  void release() {
+    if (refCount.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+      delete this;
+    }
+  }
+};
+
+} // namespace expo
+
+inline void retainRuntimeScheduler(expo::RuntimeScheduler *scheduler) {
+  scheduler->retain();
+}
+
+inline void releaseRuntimeScheduler(expo::RuntimeScheduler *scheduler) {
+  scheduler->release();
+}
+
+#endif // __cplusplus
+"""
+    open(sched, 'w', encoding='utf-8').write(sched_content)
+    print(f"  Fixed RuntimeScheduler.h in: {sched}")
+
+# 9. Fix HostFunctionClosure.h for Swift C++ immortal reference interop
 hfc = os.path.join('node_modules', 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI-Cxx', 'include', 'HostFunctionClosure.h')
 if os.path.exists(hfc):
-    content = open(hfc, 'r', encoding='utf-8').read()
-    orig = content
-    content = content.replace('class SWIFT_IMMORTAL_REFERENCE HostFunctionClosure final', 'class HostFunctionClosure final')
-    content = content.replace('SWIFT_RETURNS_UNRETAINED explicit HostFunctionClosure', 'explicit HostFunctionClosure')
-    if '} SWIFT_IMMORTAL_REFERENCE; // class HostFunctionClosure' not in content:
-        content = content.replace('}; // class HostFunctionClosure', '} SWIFT_IMMORTAL_REFERENCE; // class HostFunctionClosure')
-    if content != orig:
-        open(hfc, 'w', encoding='utf-8').write(content)
-        print(f"  Restored HostFunctionClosure in: {hfc}")
+    hfc_content = """#pragma once
+
+#include <swift/bridging>
+#include <jsi/jsi.h>
+
+#include "RetainedSwiftPointer.h"
+
+namespace expo {
+
+class SWIFT_IMMORTAL_REFERENCE HostFunctionClosure final : public RetainedSwiftPointer {
+public:
+  using Closure = bool(Context context, const facebook::jsi::Value *_Nonnull thisValue, const facebook::jsi::Value *_Nonnull args, size_t count, facebook::jsi::Value *_Nonnull result);
+
+  SWIFT_RETURNS_UNRETAINED explicit HostFunctionClosure(Context context, Closure closure, Deallocator deallocator) : RetainedSwiftPointer(context, deallocator), _closure(closure) {};
+
+  virtual ~HostFunctionClosure() {
+    _deallocator(_context);
+  }
+
+  inline bool call(const facebook::jsi::Value &thisValue, const facebook::jsi::Value *_Nonnull args, size_t count, facebook::jsi::Value &result) const {
+    return _closure(_context, &thisValue, args, count, &result);
+  }
+
+private:
+  Closure *_Nonnull _closure;
+
+}; // class HostFunctionClosure
+
+} // namespace expo
+"""
+    open(hfc, 'w', encoding='utf-8').write(hfc_content)
+    print(f"  Fixed HostFunctionClosure.h in: {hfc}")
 
 # 10. Fix Package.swift files (swift-tools-version: 6.0, swiftLanguageModes: [.v5], and strip trailing commas before ')')
 for root, _, files in os.walk('node_modules'):
