@@ -60,6 +60,10 @@ if os.path.exists(js_runtime):
     # Use Swift 'consume' operator to move propNameId without extraneous label
     content = content.replace('vector.push_back(propNameId)', 'vector.push_back(consume propNameId)')
     content = content.replace('vector.push_back(consuming: propNameId)', 'vector.push_back(consume propNameId)')
+    content = content.replace(
+        'let propNameId = facebook.jsi.PropNameID.forUtf8(iRuntime, std.string(propertyName))',
+        'var propNameId = facebook.jsi.PropNameID.forUtf8(iRuntime, std.string(propertyName))'
+    )
     # Fix regex literal syntax parsing error on Swift 6
     content = content.replace(
         'name.wholeMatch(of: /^[a-zA-Z_$][a-zA-Z0-9_$]*$/) == nil',
