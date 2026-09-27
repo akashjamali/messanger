@@ -72,13 +72,48 @@ js_actor = os.path.join('node_modules', 'expo-modules-jsi', 'apple', 'Sources', 
 if os.path.exists(js_actor):
     content = open(js_actor, 'r', encoding='utf-8').read()
     orig = content
-    old_call = 'let runner = unsafeBitCast(runIsolated as IsolatedRunner, to: NonisolatedRunner.self)\n    return runner(operation)'
-    new_call = 'return runIsolated(operation)'
-    content = content.replace(old_call, new_call)
-    old_def = '@JavaScriptActor\n  @usableFromInline\n  internal static func runIsolated<T: ~Copyable>(_ operation: @JavaScriptActor () -> T) -> T {\n    return operation()\n  }'
-    new_def = '@usableFromInline\n  internal static func runIsolated<T: ~Copyable>(_ operation: @JavaScriptActor () -> T) -> T {\n    typealias NonisolatedFn = () -> T\n    let fn = unsafeBitCast(operation, to: NonisolatedFn.self)\n    return fn()\n  }'
-    content = content.replace(old_def, new_def)
-    if content != orig:
+    pattern = r'public static func assumeIsolated.*?internal static func runIsolated.*?\}\s*\}'
+    replacement = """public static func assumeIsolated<T>(_ operation: @JavaScriptActor () -> T) -> T {
+    checkIsolated()
+    typealias YesActor = @JavaScriptActor () -> T
+    typealias NoActor = () -> T
+    return withoutActuallyEscaping(operation) { (_ fn: @escaping YesActor) -> T in
+      let rawFn = unsafeBitCast(fn, to: NoActor.self)
+      return rawFn()
+    }
+  }
+
+  /// Throwing counterpart to the nonthrowing overload above. The generic error type keeps
+  /// `operation` nonescaping while preserving the exact error it can throw.
+  @_alwaysEmitIntoClient
+  @inline(__always)
+  public static func assumeIsolated<T, E: Error>(
+    _ operation: @JavaScriptActor () throws(E) -> T
+  ) throws(E) -> T {
+    let result: Result<T, E> = assumeIsolated {
+      return Result(catching: operation)
+    }
+    return try result.get()
+  }
+
+  /// In debug builds, asserts if the actor's executor is not isolating the current context.
+  @inlinable
+  @inline(__always)
+  public static func checkIsolated() {
+    assert(
+      Thread.current.name == "com.facebook.react.runtime.JavaScript" || !Thread.isMultiThreaded()
+        || ProcessInfo.processInfo.processName == "xctest",
+      "JavaScriptActor operations must be run on the JavaScript thread"
+    )
+  }
+
+  @usableFromInline
+  internal static func runIsolated<T>(_ operation: @JavaScriptActor () -> T) -> T {
+    return assumeIsolated(operation)
+  }
+}"""
+    content, count = re.subn(pattern, replacement, content, flags=re.DOTALL)
+    if count > 0 and content != orig:
         open(js_actor, 'w', encoding='utf-8').write(content)
         print(f"  Fixed actor isolation in: {js_actor}")
 
