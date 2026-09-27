@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     name: Build Unsigned iOS IPA
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
       - name: Checkout repository
@@ -27,27 +27,19 @@ jobs:
         run: npx expo prebuild --platform ios --clean
 
       - name: Install CocoaPods
-        working-directory: ios
-        run: |
-          pod install || true
+        run: npx pod-install ios
 
       - name: Build unsigned iOS app with Xcode
         working-directory: ios
         run: |
-          if ls -d *.xcworkspace 1>/dev/null 2>&1; then
-            TARGET="-workspace $(ls -d *.xcworkspace | head -n 1)"
-          else
-            TARGET="-project $(ls -d *.xcodeproj | head -n 1)"
-          fi
-          echo "Using target: $TARGET"
-
-          SCHEME="Messenger"
-          echo "Building scheme: $SCHEME"
+          echo "Listing iOS directory content:"
+          ls -la
 
           xcodebuild \
-            $TARGET \
-            -scheme "$SCHEME" \
+            -workspace Messenger.xcworkspace \
+            -scheme "Messenger" \
             -configuration Release \
+            -destination "generic/platform=iOS" \
             -sdk iphoneos \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
