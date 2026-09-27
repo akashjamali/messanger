@@ -1,4 +1,5 @@
 import os
+import re
 
 print("Applying Swift 6 & C++ interop patches to expo-modules-jsi...")
 
@@ -94,7 +95,7 @@ if os.path.exists(hfc):
         open(hfc, 'w', encoding='utf-8').write(content)
         print(f"  Restored HostFunctionClosure in: {hfc}")
 
-# 7. Fix Package.swift files (swift-tools-version: 6.0 and swiftLanguageModes: [.v5])
+# 7. Fix Package.swift files (swift-tools-version: 6.0, swiftLanguageModes: [.v5], and strip trailing commas before ')')
 for root, _, files in os.walk('node_modules'):
     for f in files:
         if f == 'Package.swift':
@@ -104,10 +105,12 @@ for root, _, files in os.walk('node_modules'):
                 orig = content
                 content = content.replace('swift-tools-version: 6.2', 'swift-tools-version: 6.0')
                 content = content.replace('swiftLanguageModes: [.v6]', 'swiftLanguageModes: [.v5]')
+                content = re.sub(r',\s*\)', ')', content)
                 if content != orig:
                     open(path, 'w', encoding='utf-8').write(content)
                     print(f"  Fixed Package.swift in: {path}")
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"  Error fixing {path}: {e}")
 
 print("Finished applying expo-modules-jsi patches.")
+
