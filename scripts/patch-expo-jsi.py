@@ -62,25 +62,21 @@ if os.path.exists(js_runtime):
         open(js_runtime, 'w', encoding='utf-8').write(content)
         print(f"  Fixed syntax in: {js_runtime}")
 
-# 5. Fix RuntimeScheduler.h constructor annotations
+# 5. Fix RuntimeScheduler.h for Xcode 16.2
 sched = os.path.join('node_modules', 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI-Cxx', 'include', 'RuntimeScheduler.h')
 if os.path.exists(sched):
     content = open(sched, 'r', encoding='utf-8').read()
     orig = content
-    # Restore class declaration
+    # In Xcode 16.2, SWIFT_RETURNS_RETAINED is not in <swift/bridging>
+    content = content.replace('SWIFT_RETURNS_RETAINED ', '')
     content = content.replace('class SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler) RuntimeScheduler {', 'class RuntimeScheduler {')
-    # Restore attribute at class end if missing
     if '} SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler);' not in content:
         content = content.replace('};\n\n} // namespace expo', '} SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler);\n\n} // namespace expo')
         content = content.replace('};\n} // namespace expo', '} SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler);\n\n} // namespace expo')
-    # Add SWIFT_RETURNS_RETAINED to constructors
-    if 'SWIFT_RETURNS_RETAINED RuntimeScheduler(' not in content:
-        content = content.replace('RuntimeScheduler(void *scheduler, ScheduleFn fn) noexcept', 'SWIFT_RETURNS_RETAINED RuntimeScheduler(void *scheduler, ScheduleFn fn) noexcept')
-    if 'SWIFT_RETURNS_RETAINED RuntimeScheduler()' not in content:
-        content = content.replace('RuntimeScheduler() {}', 'SWIFT_RETURNS_RETAINED RuntimeScheduler() {}')
     if content != orig:
         open(sched, 'w', encoding='utf-8').write(content)
         print(f"  Fixed attributes in: {sched}")
+
 
 # 6. Fix HostFunctionClosure.h (restore original immortal reference)
 hfc = os.path.join('node_modules', 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI-Cxx', 'include', 'HostFunctionClosure.h')
