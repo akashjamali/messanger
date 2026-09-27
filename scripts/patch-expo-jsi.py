@@ -57,8 +57,9 @@ if os.path.exists(js_runtime):
     content = open(js_runtime, 'r', encoding='utf-8').read()
     orig = content
     content = content.replace('_ arguments: consuming JavaScriptValuesBuffer,', '_ arguments: consuming JavaScriptValuesBuffer')
-    content = content.replace('vector.push_back(consuming: propNameId)', 'vector.push_back(propNameId)')
-    # Fix regex literal syntax parsing error on Xcode 16.2
+    # Restore vector.push_back(consuming:) for move-only PropNameID
+    content = content.replace('vector.push_back(propNameId)', 'vector.push_back(consuming: propNameId)')
+    # Fix regex literal syntax parsing error on Swift 6
     content = content.replace(
         'name.wholeMatch(of: /^[a-zA-Z_$][a-zA-Z0-9_$]*$/) == nil',
         'name.range(of: "^[a-zA-Z_$][a-zA-Z0-9_$]*$", options: .regularExpression) == nil'
@@ -66,6 +67,23 @@ if os.path.exists(js_runtime):
     if content != orig:
         open(js_runtime, 'w', encoding='utf-8').write(content)
         print(f"  Fixed syntax in: {js_runtime}")
+
+# 4b. Fix Task+immediate.swift polyfill on Swift 6 / Xcode 16
+task_imm = os.path.join('node_modules', 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI', 'Extensions', 'Task+immediate.swift')
+if os.path.exists(task_imm):
+    content = open(task_imm, 'r', encoding='utf-8').read()
+    orig = content
+    old_task = '''    if #available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, *) {
+      return Task.immediate(name: name, priority: priority, operation: operation)
+    } else {
+      // In the polyfill always use the highest priority and hope it executes earlier.
+      return Task(name: name, priority: .high, operation: operation)
+    }'''
+    new_task = '    return Task(priority: priority ?? .high, operation: operation)'
+    content = content.replace(old_task, new_task)
+    if content != orig:
+        open(task_imm, 'w', encoding='utf-8').write(content)
+        print(f"  Fixed Task+immediate in: {task_imm}")
 
 # 5. Fix JavaScriptActor.swift assumeIsolated / runIsolated cross-actor reference
 js_actor = os.path.join('node_modules', 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI', 'Runtime', 'JavaScriptActor.swift')
