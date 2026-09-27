@@ -49,11 +49,11 @@ jobs:
           echo "Found app at: $APP_PATH"
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          zip -r MiFiConnect.ipa Payload
+          zip -r Messenger.ipa Payload
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MiFiConnect-iOS-IPA
-          path: ios/MiFiConnect.ipa
+          name: Messenger-iOS-IPA
+          path: ios/Messenger.ipa
           retention-days: 7

@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "MiFi Connect",
-    "slug": "mifi-connect",
+    "name": "Messenger",
+    "slug": "messenger",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./media/favicon_io/android-chrome-512x512.png",
@@ -19,7 +19,7 @@
     "ios": {
       "icon": "./media/favicon_io/android-chrome-512x512.png",
       "supportsTablet": true,
-      "bundleIdentifier": "com.ttindern.mificonnect",
+      "bundleIdentifier": "com.ttindern.messenger",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocalNetworkUsageDescription": "This app requires local network access to connect to your MiFi router.",
