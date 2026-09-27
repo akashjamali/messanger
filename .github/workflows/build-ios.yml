@@ -28,14 +28,18 @@ jobs:
           xcodebuild -version
           xcrun swift --version
 
+      - name: Patch ExpoModulesJSI for Swift 6
+        run: |
+          python3 scripts/patch-expo-jsi.py
+          chmod -R +x node_modules/expo-modules-jsi/apple/scripts/ || true
+          python3 -c "p = 'node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh'; c = open(p).read().replace('-quiet', ''); open(p, 'w').write(c)" || true
+
       - name: Run Expo Prebuild
         run: npx expo prebuild --platform ios --clean
 
-      - name: Patch ExpoModulesJSI for Xcode compatibility
+      - name: Re-apply patches after prebuild
         run: |
-          chmod -R +x node_modules/expo-modules-jsi/apple/scripts/ || true
-          find node_modules -name "Package.swift" -exec sed -i '' 's/swift-tools-version: 6.2/swift-tools-version: 6.0/g' {} + || true
-          python3 -c "p = 'node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh'; c = open(p).read().replace('-quiet', ''); open(p, 'w').write(c)" || true
+          python3 scripts/patch-expo-jsi.py
 
       - name: Install CocoaPods
         run: npx pod-install ios
