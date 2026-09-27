@@ -21,6 +21,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.ttindern.mificonnect",
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSLocalNetworkUsageDescription": "This app requires local network access to connect to your MiFi router.",
         "NSContactsUsageDescription": "This app uses your saved contacts to show names on messages and to start a chat.",
         "NSAppTransportSecurity": {
