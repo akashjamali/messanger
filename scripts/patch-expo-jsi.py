@@ -76,7 +76,7 @@ if os.path.exists(js_actor):
     new_call = 'return runIsolated(operation)'
     content = content.replace(old_call, new_call)
     old_def = '@JavaScriptActor\n  @usableFromInline\n  internal static func runIsolated<T: ~Copyable>(_ operation: @JavaScriptActor () -> T) -> T {\n    return operation()\n  }'
-    new_def = '@usableFromInline\n  internal static func runIsolated<T: ~Copyable>(_ operation: @JavaScriptActor () -> T) -> T {\n    typealias NonisolatedFn = () -> T\n    let fn = unsafeBitCast(operation, to: NonisolatedFn.self)\n    return fn()\n  }'
+    new_def = '@usableFromInline\n  internal static func runIsolated<T: ~Copyable>(_ operation: @JavaScriptActor () -> T) -> T {\n    return withoutActuallyEscaping(operation) { escapableOperation in\n      typealias NonisolatedFn = () -> T\n      let fn = unsafeBitCast(escapableOperation, to: NonisolatedFn.self)\n      return fn()\n    }\n  }'
     content = content.replace(old_def, new_def)
     if content != orig:
         open(js_actor, 'w', encoding='utf-8').write(content)
