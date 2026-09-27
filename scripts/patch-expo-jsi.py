@@ -2,17 +2,21 @@ import os
 
 print("Applying Swift 6 / Xcode 16.4 compatibility patches to expo-modules-jsi...")
 
-# 1. Fix 'weak let' -> 'weak var' in all Swift files in expo-modules-jsi
+# 1. Fix 'weak let' / 'weak var' -> 'nonisolated(unsafe) weak var' for Sendable compliance in Swift 6
 for root, _, files in os.walk('node_modules/expo-modules-jsi'):
     for f in files:
         if f.endswith('.swift'):
             path = os.path.join(root, f)
             try:
                 content = open(path, 'r', encoding='utf-8').read()
-                if 'weak let' in content:
-                    content = content.replace('weak let', 'weak var')
+                orig = content
+                content = content.replace('weak let runtime:', 'nonisolated(unsafe) weak var runtime:')
+                content = content.replace('weak var runtime:', 'nonisolated(unsafe) weak var runtime:')
+                content = content.replace('weak let', 'weak var')
+                content = content.replace('nonisolated(unsafe) nonisolated(unsafe)', 'nonisolated(unsafe)')
+                if content != orig:
                     open(path, 'w', encoding='utf-8').write(content)
-                    print(f"  Fixed weak let in: {path}")
+                    print(f"  Fixed weak / Sendable in: {path}")
             except Exception as e:
                 print(f"  Error reading {path}: {e}")
 
