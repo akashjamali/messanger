@@ -23,18 +23,30 @@ jobs:
       - name: Install dependencies
         run: npm ci || npm install --legacy-peer-deps
 
+      - name: Show Xcode & Swift version
+        run: |
+          xcodebuild -version
+          xcrun swift --version
+
       - name: Run Expo Prebuild
         run: npx expo prebuild --platform ios --clean
+
+      - name: Patch ExpoModulesJSI for Xcode compatibility
+        run: |
+          chmod -R +x node_modules/expo-modules-jsi/apple/scripts/ || true
+          find node_modules -name "Package.swift" -exec sed -i '' 's/swift-tools-version: 6.2/swift-tools-version: 6.0/g' {} + || true
+          python3 -c "p = 'node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh'; c = open(p).read().replace('-quiet', ''); open(p, 'w').write(c)" || true
 
       - name: Install CocoaPods
         run: npx pod-install ios
 
+      - name: Prebuild ExpoModulesJSI xcframework
+        run: |
+          PODS_ROOT="$PWD/ios/Pods" RN_ROOT="$PWD/node_modules/react-native" PLATFORM_NAME="iphoneos" bash node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh
+
       - name: Build unsigned iOS app with Xcode
         working-directory: ios
         run: |
-          echo "Listing iOS directory content:"
-          ls -la
-
           xcodebuild \
             -workspace Messenger.xcworkspace \
             -scheme "Messenger" \
