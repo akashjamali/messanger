@@ -20,7 +20,37 @@ for root, _, files in os.walk('node_modules/expo-modules-jsi'):
             except Exception as e:
                 print(f"  Error reading {path}: {e}")
 
-# 2. Fix syntax errors in JavaScriptRuntime.swift
+# 2. Fix HostFunctionContext and HostObjectContext Sendable warnings/errors
+hfc_swift = os.path.join('node_modules', 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI', 'Contexts', 'HostFunctionContext.swift')
+if os.path.exists(hfc_swift):
+    content = open(hfc_swift, 'r', encoding='utf-8').read()
+    orig = content
+    content = content.replace('HostCallbackContext, Sendable', 'HostCallbackContext, @unchecked Sendable')
+    if content != orig:
+        open(hfc_swift, 'w', encoding='utf-8').write(content)
+        print(f"  Fixed @unchecked Sendable in: {hfc_swift}")
+
+hoc_swift = os.path.join('node_modules', 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI', 'Contexts', 'HostObjectContext.swift')
+if os.path.exists(hoc_swift):
+    content = open(hoc_swift, 'r', encoding='utf-8').read()
+    orig = content
+    content = content.replace('HostCallbackContext, Sendable', 'HostCallbackContext, @unchecked Sendable')
+    if content != orig:
+        open(hoc_swift, 'w', encoding='utf-8').write(content)
+        print(f"  Fixed @unchecked Sendable in: {hoc_swift}")
+
+# 3. Fix JavaScriptPromise.swift global actor LongLivedState initialization
+promise_swift = os.path.join('node_modules', 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI', 'Runtime', 'Values', 'JavaScriptPromise.swift')
+if os.path.exists(promise_swift):
+    content = open(promise_swift, 'r', encoding='utf-8').read()
+    orig = content
+    if 'nonisolated init() {}' not in content:
+        content = content.replace('private final class LongLivedState: LongLivedObject {', 'private final class LongLivedState: LongLivedObject {\n    nonisolated init() {}')
+    if content != orig:
+        open(promise_swift, 'w', encoding='utf-8').write(content)
+        print(f"  Fixed LongLivedState init in: {promise_swift}")
+
+# 4. Fix syntax errors in JavaScriptRuntime.swift
 js_runtime = os.path.join('node_modules', 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI', 'Runtime', 'JavaScriptRuntime.swift')
 if os.path.exists(js_runtime):
     content = open(js_runtime, 'r', encoding='utf-8').read()
@@ -31,16 +61,18 @@ if os.path.exists(js_runtime):
         open(js_runtime, 'w', encoding='utf-8').write(content)
         print(f"  Fixed syntax in: {js_runtime}")
 
-# 3. Fix RuntimeScheduler.h attribute placement & constructor annotations
+# 5. Fix RuntimeScheduler.h constructor annotations
 sched = os.path.join('node_modules', 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI-Cxx', 'include', 'RuntimeScheduler.h')
 if os.path.exists(sched):
     content = open(sched, 'r', encoding='utf-8').read()
     orig = content
-    # Move SWIFT_SHARED_REFERENCE to class declaration
-    if 'class SWIFT_SHARED_REFERENCE' not in content:
-        content = content.replace('class RuntimeScheduler {', 'class SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler) RuntimeScheduler {')
-    content = content.replace('} SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler);', '};')
-    # Ensure constructors have SWIFT_RETURNS_RETAINED
+    # Restore class declaration
+    content = content.replace('class SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler) RuntimeScheduler {', 'class RuntimeScheduler {')
+    # Restore attribute at class end if missing
+    if '} SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler);' not in content:
+        content = content.replace('};\n\n} // namespace expo', '} SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler);\n\n} // namespace expo')
+        content = content.replace('};\n} // namespace expo', '} SWIFT_SHARED_REFERENCE(retainRuntimeScheduler, releaseRuntimeScheduler);\n\n} // namespace expo')
+    # Add SWIFT_RETURNS_RETAINED to constructors
     if 'SWIFT_RETURNS_RETAINED RuntimeScheduler(' not in content:
         content = content.replace('RuntimeScheduler(void *scheduler, ScheduleFn fn) noexcept', 'SWIFT_RETURNS_RETAINED RuntimeScheduler(void *scheduler, ScheduleFn fn) noexcept')
     if 'SWIFT_RETURNS_RETAINED RuntimeScheduler()' not in content:
@@ -49,21 +81,20 @@ if os.path.exists(sched):
         open(sched, 'w', encoding='utf-8').write(content)
         print(f"  Fixed attributes in: {sched}")
 
-# 4. Fix HostFunctionClosure.h attribute placement & constructor annotations
+# 6. Fix HostFunctionClosure.h (restore original immortal reference)
 hfc = os.path.join('node_modules', 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI-Cxx', 'include', 'HostFunctionClosure.h')
 if os.path.exists(hfc):
     content = open(hfc, 'r', encoding='utf-8').read()
     orig = content
-    if 'class SWIFT_IMMORTAL_REFERENCE' not in content:
-        content = content.replace('class HostFunctionClosure final', 'class SWIFT_IMMORTAL_REFERENCE HostFunctionClosure final')
-    content = content.replace('} SWIFT_IMMORTAL_REFERENCE;', '};')
-    if 'SWIFT_RETURNS_UNRETAINED explicit HostFunctionClosure(' not in content:
-        content = content.replace('explicit HostFunctionClosure(', 'SWIFT_RETURNS_UNRETAINED explicit HostFunctionClosure(')
+    content = content.replace('class SWIFT_IMMORTAL_REFERENCE HostFunctionClosure final', 'class HostFunctionClosure final')
+    content = content.replace('SWIFT_RETURNS_UNRETAINED explicit HostFunctionClosure', 'explicit HostFunctionClosure')
+    if '} SWIFT_IMMORTAL_REFERENCE; // class HostFunctionClosure' not in content:
+        content = content.replace('}; // class HostFunctionClosure', '} SWIFT_IMMORTAL_REFERENCE; // class HostFunctionClosure')
     if content != orig:
         open(hfc, 'w', encoding='utf-8').write(content)
-        print(f"  Fixed attributes in: {hfc}")
+        print(f"  Restored HostFunctionClosure in: {hfc}")
 
-# 5. Fix Package.swift files (swift-tools-version: 6.0 and swiftLanguageModes: [.v5])
+# 7. Fix Package.swift files (swift-tools-version: 6.0 and swiftLanguageModes: [.v5])
 for root, _, files in os.walk('node_modules'):
     for f in files:
         if f == 'Package.swift':
