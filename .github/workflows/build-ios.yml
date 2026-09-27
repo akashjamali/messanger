@@ -26,13 +26,26 @@ jobs:
       - name: Run Expo Prebuild
         run: npx expo prebuild --platform ios --clean
 
+      - name: Install CocoaPods
+        working-directory: ios
+        run: |
+          pod install || true
+
       - name: Build unsigned iOS app with Xcode
         working-directory: ios
         run: |
-          SCHEME=$(xcodebuild -list -json | python3 -c "import sys, json; print(json.load(sys.stdin)['project']['schemes'][0])")
+          if ls -d *.xcworkspace 1>/dev/null 2>&1; then
+            TARGET="-workspace $(ls -d *.xcworkspace | head -n 1)"
+          else
+            TARGET="-project $(ls -d *.xcodeproj | head -n 1)"
+          fi
+          echo "Using target: $TARGET"
+
+          SCHEME="Messenger"
           echo "Building scheme: $SCHEME"
+
           xcodebuild \
-            -workspace *.xcworkspace \
+            $TARGET \
             -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \
@@ -47,6 +60,7 @@ jobs:
         run: |
           APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -maxdepth 1 | head -n 1)
           echo "Found app at: $APP_PATH"
+          rm -rf Payload Messenger.ipa
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
           zip -r Messenger.ipa Payload
