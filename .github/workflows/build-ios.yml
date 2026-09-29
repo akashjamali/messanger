@@ -61,34 +61,27 @@ jobs:
 
       - name: Patch expo-router Toolbar iOS 26 APIs
         run: |
-          # Patch the files in both node_modules and ios/Pods (CocoaPods copies them)
-          python3 scripts/patch-expo-jsi.py
-
-          # Also directly patch the Pods source if CocoaPods copied them there
-          for f in \
-            "ios/Pods/ExpoRouter/Toolbar/RouterToolbarHostView.swift" \
-            "ios/Pods/ExpoRouter/Toolbar/RouterToolbarItemView.swift" \
-            "ios/Pods/ExpoRouter/Toolbar/RouterToolbarModule.swift" \
-            "node_modules/expo-router/ios/Toolbar/RouterToolbarHostView.swift" \
-            "node_modules/expo-router/ios/Toolbar/RouterToolbarItemView.swift" \
-            "node_modules/expo-router/ios/Toolbar/RouterToolbarModule.swift"; do
-            if [ -f "$f" ]; then
-              echo "Patching: $f"
-              # hidesSharedBackground -> guard with #available
-              perl -i -pe 's/^(\s*)(\S.*\.hidesSharedBackground\s*=.*)$/\1if #available(iOS 26.0, *) { \2 }/g' "$f"
-              perl -i -pe 's/^(\s*)(\S.*\.sharesBackground\s*=.*)$/\1if #available(iOS 26.0, *) { \2 }/g' "$f"
-              perl -i -pe 's/^(\s*)(\S.*\.badge\s*=.*)$/\1if #available(iOS 26.0, *) { \2 }/g' "$f"
-              perl -i -pe 's/^(\s*)(\S.*\.searchBarPlacementBarButtonItem.*)$/\1if #available(iOS 26.0, *) { \2 }/g' "$f"
-              perl -i -pe 's/UIBarButtonItem\.Style\.prominent/UIBarButtonItem.Style.plain/g' "$f"
-              perl -i -pe 's/\bUIBarButtonItem\.Badge\b/AnyObject \/\* iOS26+ \*\//g' "$f"
+          # Use pre-patched vendored files (with #if compiler(>=6.2) guards).
+          # Overwrite both node_modules and ios/Pods locations so Xcode sees the fixed versions.
+          PATCH_DIR="patches/expo-router-toolbar"
+          for DEST in \
+            "node_modules/expo-router/ios/Toolbar" \
+            "ios/Pods/ExpoRouter/Toolbar"; do
+            if [ -d "$DEST" ]; then
+              echo "Copying patched Toolbar files into: $DEST"
+              cp "$PATCH_DIR/RouterToolbarHostView.swift" "$DEST/RouterToolbarHostView.swift"
+              cp "$PATCH_DIR/RouterToolbarItemView.swift" "$DEST/RouterToolbarItemView.swift"
+              cp "$PATCH_DIR/RouterToolbarModule.swift"   "$DEST/RouterToolbarModule.swift"
+            else
+              echo "Directory not found (skipping): $DEST"
             fi
           done
+          echo "expo-router Toolbar patch complete."
 
       - name: Prebuild ExpoModulesJSI xcframework
         run: |
           python3 scripts/patch-expo-jsi.py
           PODS_ROOT="$PWD/ios/Pods" RN_ROOT="$PWD/node_modules/react-native" PLATFORM_NAME="iphoneos" bash node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh
-
 
       - name: Pre-bundle JavaScript & Assets
         run: |
