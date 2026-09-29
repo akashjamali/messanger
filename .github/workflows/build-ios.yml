@@ -1,0 +1,40 @@
+name: Build iOS (.ipa)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    name: EAS Build iOS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build iOS app
+        run: eas build --platform ios --profile preview --non-interactive
+
+      - name: Get build URL
+        if: success()
+        run: |
+          echo "✅ Build submitted to EAS!"
+          echo "Check your build status at: https://expo.dev/accounts/YOUR_ACCOUNT/projects/liquid-glass-chat-ui/builds"
+          echo ""
+          echo "Once complete, download the .ipa from the EAS dashboard."

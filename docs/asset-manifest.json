@@ -1,0 +1,12 @@
+[
+  {
+    "path": "assets/cookbooks/fable/avatars/me.jpg",
+    "bytes": 40134,
+    "sha256": "6f333550826d837d0d7ba16951b33d7161b1a9a3b4e56a71eedc9bd2fdf9b30a"
+  },
+  {
+    "path": "assets/images/icon.png",
+    "bytes": 86137,
+    "sha256": "22df6d95e84d9401704260aacf9b4413fa139a39298391f03e074df26fc92c65"
+  }
+]
