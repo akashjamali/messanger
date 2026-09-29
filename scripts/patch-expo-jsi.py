@@ -965,4 +965,76 @@ for gbase in ['node_modules/expo-glass-effect', 'ios/Pods/ExpoGlassEffect']:
                 open(js_f, 'w', encoding='utf-8').write(jc)
                 print(f"  Fixed JS file in: {js_f}")
 
+# 16. Patch expo-router Toolbar files that use iOS 26-only APIs
+# These APIs don't exist on iOS 18.5 SDK (Xcode 16.4): hidesSharedBackground, sharesBackground,
+# searchBarPlacementBarButtonItem, UIBarButtonItem.Badge, badge, UIBarButtonItem.Style.prominent
+toolbar_dir = os.path.join('node_modules', 'expo-router', 'ios', 'Toolbar')
+if os.path.exists(toolbar_dir):
+    # RouterToolbarHostView.swift: remove hidesSharedBackground usage
+    host_view = os.path.join(toolbar_dir, 'RouterToolbarHostView.swift')
+    if os.path.exists(host_view):
+        c = open(host_view, 'r', encoding='utf-8').read()
+        orig = c
+        # Wrap iOS 26+ APIs in availability guard
+        c = re.sub(
+            r'(\s*)([\w\.]+\.hidesSharedBackground\s*=\s*[^\n]+)',
+            r'\1if #available(iOS 26.0, *) { \2 }',
+            c
+        )
+        c = re.sub(
+            r'(\s*)([\w\.]+\.sharesBackground\s*=\s*[^\n]+)',
+            r'\1if #available(iOS 26.0, *) { \2 }',
+            c
+        )
+        if c != orig:
+            open(host_view, 'w', encoding='utf-8').write(c)
+            print(f"  Fixed iOS 26 APIs in: {host_view}")
+
+    # RouterToolbarItemView.swift: multiple iOS 26 APIs
+    item_view = os.path.join(toolbar_dir, 'RouterToolbarItemView.swift')
+    if os.path.exists(item_view):
+        c = open(item_view, 'r', encoding='utf-8').read()
+        orig = c
+        # Wrap hidesSharedBackground
+        c = re.sub(
+            r'(\s*)([\w\.]+\.hidesSharedBackground\s*=\s*[^\n]+)',
+            r'\1if #available(iOS 26.0, *) { \2 }',
+            c
+        )
+        # Wrap sharesBackground
+        c = re.sub(
+            r'(\s*)([\w\.]+\.sharesBackground\s*=\s*[^\n]+)',
+            r'\1if #available(iOS 26.0, *) { \2 }',
+            c
+        )
+        # Wrap .badge and UIBarButtonItem.Badge usage in availability blocks
+        c = re.sub(
+            r'(\s*)([\w\.]+\.badge\s*=\s*[^\n]+)',
+            r'\1if #available(iOS 26.0, *) { \2 }',
+            c
+        )
+        # searchBarPlacementBarButtonItem
+        c = re.sub(
+            r'(\s*)([\w\.]+\.searchBarPlacementBarButtonItem[^\n]+)',
+            r'\1if #available(iOS 26.0, *) { \2 }',
+            c
+        )
+        # UIBarButtonItem.Badge type references
+        c = c.replace('UIBarButtonItem.Badge', 'AnyObject /* UIBarButtonItem.Badge iOS26+ */')
+        if c != orig:
+            open(item_view, 'w', encoding='utf-8').write(c)
+            print(f"  Fixed iOS 26 APIs in: {item_view}")
+
+    # RouterToolbarModule.swift: UIBarButtonItem.Style.prominent
+    module_swift = os.path.join(toolbar_dir, 'RouterToolbarModule.swift')
+    if os.path.exists(module_swift):
+        c = open(module_swift, 'r', encoding='utf-8').read()
+        orig = c
+        # Replace .prominent with .plain (available on all iOS versions)
+        c = c.replace('UIBarButtonItem.Style.prominent', 'UIBarButtonItem.Style.plain')
+        c = c.replace('.prominent', '.plain /* was .prominent iOS26+ */')
+        if c != orig:
+            open(module_swift, 'w', encoding='utf-8').write(c)
+            print(f"  Fixed .prominent style in: {module_swift}")
+
 print("Finished applying expo-modules-jsi patches.")
