@@ -966,73 +966,100 @@ for gbase in ['node_modules/expo-glass-effect', 'ios/Pods/ExpoGlassEffect']:
                 print(f"  Fixed JS file in: {js_f}")
 
 # 16. Patch expo-router Toolbar files that use iOS 26-only APIs
-# These APIs don't exist on iOS 18.5 SDK (Xcode 16.4): hidesSharedBackground, sharesBackground,
-# searchBarPlacementBarButtonItem, UIBarButtonItem.Badge, badge, UIBarButtonItem.Style.prominent
+# Xcode 16.4 (Swift 5.10) cannot compile #available(iOS 26.0, *) bodies for APIs
+# that don't exist in the iOS 18.5 SDK. Must use #if compiler(>=6.2) to exclude them.
 toolbar_dir = os.path.join('node_modules', 'expo-router', 'ios', 'Toolbar')
 if os.path.exists(toolbar_dir):
-    # RouterToolbarHostView.swift: remove hidesSharedBackground usage
+    # RouterToolbarHostView.swift: wrap hidesSharedBackground/sharesBackground block
     host_view = os.path.join(toolbar_dir, 'RouterToolbarHostView.swift')
     if os.path.exists(host_view):
         c = open(host_view, 'r', encoding='utf-8').read()
         orig = c
-        # Wrap iOS 26+ APIs in availability guard
-        c = re.sub(
-            r'(\s*)([\w\.]+\.hidesSharedBackground\s*=\s*[^\n]+)',
-            r'\1if #available(iOS 26.0, *) { \2 }',
-            c
-        )
-        c = re.sub(
-            r'(\s*)([\w\.]+\.sharesBackground\s*=\s*[^\n]+)',
-            r'\1if #available(iOS 26.0, *) { \2 }',
-            c
-        )
+        old = '            if #available(iOS 26.0, *) {\n              if let hidesSharedBackground = menu.hidesSharedBackground {'
+        new = '#if compiler(>=6.2)\n            if #available(iOS 26.0, *) {\n              if let hidesSharedBackground = menu.hidesSharedBackground {'
+        if old in c and '#if compiler(>=6.2)' not in c:
+            # find closing brace of this if block and add #endif after it
+            idx = c.index(old)
+            # find the matching closing brace after the block
+            block_end = c.index('\n            }\n            if let titleStyle', idx)
+            c = c[:idx] + new + c[idx + len(old):]
+            # now add #endif before "if let titleStyle"
+            c = c.replace(
+                '            }\n            if let titleStyle = menu.titleStyle',
+                '            }\n#endif\n            if let titleStyle = menu.titleStyle',
+                1
+            )
         if c != orig:
             open(host_view, 'w', encoding='utf-8').write(c)
             print(f"  Fixed iOS 26 APIs in: {host_view}")
 
-    # RouterToolbarItemView.swift: multiple iOS 26 APIs
+    # RouterToolbarItemView.swift: use #if compiler(>=6.2) around both iOS 26 blocks
     item_view = os.path.join(toolbar_dir, 'RouterToolbarItemView.swift')
     if os.path.exists(item_view):
         c = open(item_view, 'r', encoding='utf-8').read()
         orig = c
-        # Wrap hidesSharedBackground
-        c = re.sub(
-            r'(\s*)([\w\.]+\.hidesSharedBackground\s*=\s*[^\n]+)',
-            r'\1if #available(iOS 26.0, *) { \2 }',
-            c
+
+        # Fix searchBar case - remove searchBarPlacementBarButtonItem usage entirely
+        old_search = """    } else if type == .searchBar {
+      guard #available(iOS 26.0, *), let controller = self.host?.findViewController() else {
+        // Check for iOS 26, should already be guarded by the JS side, so this warning will only fire if controller is nil
+        logger?.warn(
+          \"[expo-router] navigationItem.searchBarPlacementBarButtonItem not available. This is most likely a bug in expo-router.\"
         )
-        # Wrap sharesBackground
-        c = re.sub(
-            r'(\s*)([\w\.]+\.sharesBackground\s*=\s*[^\n]+)',
-            r'\1if #available(iOS 26.0, *) { \2 }',
-            c
+        currentBarButtonItem = nil
+        return
+      }
+      guard let navController = controller.navigationController else {
+        currentBarButtonItem = nil
+        return
+      }
+      guard navController.isNavigationBarHidden == false else {
+        logger?.warn(
+          \"[expo-router] Toolbar.SearchBarPreferredSlot should only be used when stack header is shown.\"
         )
-        # Wrap .badge and UIBarButtonItem.Badge usage in availability blocks
-        c = re.sub(
-            r'(\s*)([\w\.]+\.badge\s*=\s*[^\n]+)',
-            r'\1if #available(iOS 26.0, *) { \2 }',
-            c
-        )
-        # searchBarPlacementBarButtonItem
-        c = re.sub(
-            r'(\s*)([\w\.]+\.searchBarPlacementBarButtonItem[^\n]+)',
-            r'\1if #available(iOS 26.0, *) { \2 }',
-            c
-        )
-        # UIBarButtonItem.Badge type references
-        c = c.replace('UIBarButtonItem.Badge', 'AnyObject /* UIBarButtonItem.Badge iOS26+ */')
+        currentBarButtonItem = nil
+        return
+      }
+
+      item = controller.navigationItem.searchBarPlacementBarButtonItem"""
+        new_search = """    } else if type == .searchBar {
+      // searchBarPlacementBarButtonItem is iOS 26+ only — skip on iOS 18
+      logger?.warn(
+        \"[expo-router] Toolbar.SearchBarPreferredSlot requires iOS 26+. Not available on this OS version.\"
+      )
+      currentBarButtonItem = nil
+      return"""
+        if old_search in c:
+            c = c.replace(old_search, new_search)
+
+        # Wrap applyCommonProperties iOS 26 blocks in #if compiler(>=6.2)
+        old_common1 = '    if #available(iOS 26.0, *) {\n      item.hidesSharedBackground = hidesSharedBackground\n      item.sharesBackground = sharesBackground\n    }\n    item.style'
+        new_common1 = '#if compiler(>=6.2)\n    if #available(iOS 26.0, *) {\n      item.hidesSharedBackground = hidesSharedBackground\n      item.sharesBackground = sharesBackground\n    }\n#endif\n    item.style'
+        if old_common1 in c:
+            c = c.replace(old_common1, new_common1)
+
+        old_common2 = '    if #available(iOS 26.0, *) {\n      if let badgeConfig = badgeConfiguration {'
+        new_common2 = '#if compiler(>=6.2)\n    if #available(iOS 26.0, *) {\n      if let badgeConfig = badgeConfiguration {'
+        if old_common2 in c and '#if compiler(>=6.2)' not in c[c.index(old_common2)-5:c.index(old_common2)+5]:
+            # find end of the badge block
+            idx = c.index(old_common2)
+            c = c.replace(old_common2, new_common2, 1)
+            # add #endif after the closing badge block
+            c = c.replace('        item.badge = nil\n      }\n    }\n  }', '        item.badge = nil\n      }\n    }\n#endif\n  }', 1)
+
         if c != orig:
             open(item_view, 'w', encoding='utf-8').write(c)
             print(f"  Fixed iOS 26 APIs in: {item_view}")
 
-    # RouterToolbarModule.swift: UIBarButtonItem.Style.prominent
+    # RouterToolbarModule.swift: UIBarButtonItem.Style.prominent -> #if compiler(>=6.2)
     module_swift = os.path.join(toolbar_dir, 'RouterToolbarModule.swift')
     if os.path.exists(module_swift):
         c = open(module_swift, 'r', encoding='utf-8').read()
         orig = c
-        # Replace .prominent with .plain (available on all iOS versions)
-        c = c.replace('UIBarButtonItem.Style.prominent', 'UIBarButtonItem.Style.plain')
-        c = c.replace('.prominent', '.plain /* was .prominent iOS26+ */')
+        old_prom = '    case .prominent:\n      if #available(iOS 26.0, *) {\n        return .prominent\n      } else {\n        return .done\n      }'
+        new_prom = '    case .prominent:\n#if compiler(>=6.2)\n      if #available(iOS 26.0, *) {\n        return .prominent\n      } else {\n        return .done\n      }\n#else\n      return .done\n#endif'
+        if old_prom in c and '#if compiler' not in c:
+            c = c.replace(old_prom, new_prom)
         if c != orig:
             open(module_swift, 'w', encoding='utf-8').write(c)
             print(f"  Fixed .prominent style in: {module_swift}")
