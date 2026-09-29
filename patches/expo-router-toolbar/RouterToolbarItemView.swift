@@ -145,47 +145,12 @@ class RouterToolbarItemView: RouterViewWithLogger {
   }
 
   private func applyCommonProperties(to item: UIBarButtonItem) {
-#if compiler(>=6.2)
-    if #available(iOS 26.0, *) {
-      item.hidesSharedBackground = hidesSharedBackground
-      item.sharesBackground = sharesBackground
-    }
-#endif
     item.style = barButtonItemStyle ?? .plain
     item.width = width.map { CGFloat($0) } ?? 0
     item.isSelected = selected
     item.accessibilityLabel = routerAccessibilityLabel
     item.accessibilityHint = routerAccessibilityHint
     item.isEnabled = !disabled
-#if compiler(>=6.2)
-    if #available(iOS 26.0, *) {
-      if let badgeConfig = badgeConfiguration {
-        var badge = UIBarButtonItem.Badge.indicator()
-        if let value = badgeConfig.value {
-          badge = .string(value)
-        }
-        if let backgroundColor = badgeConfig.backgroundColor {
-          badge.backgroundColor = backgroundColor
-        }
-        if let foregroundColor = badgeConfig.color {
-          badge.foregroundColor = foregroundColor
-        }
-        if badgeConfig.fontFamily != nil || badgeConfig.fontSize != nil
-          || badgeConfig.fontWeight != nil {
-          let font = RouterFontUtils.convertTitleStyleToFont(
-            TitleStyle(
-              fontFamily: badgeConfig.fontFamily,
-              fontSize: badgeConfig.fontSize,
-              fontWeight: badgeConfig.fontWeight
-            ))
-          badge.font = font
-        }
-        item.badge = badge
-      } else {
-        item.badge = nil
-      }
-    }
-#endif
   }
 
   required init(appContext: AppContext? = nil) {

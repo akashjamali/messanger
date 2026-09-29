@@ -94,15 +94,7 @@ enum BarItemStyle: String, Enumerable {
     case .plain:
       return .plain
     case .prominent:
-#if compiler(>=6.2)
-      if #available(iOS 26.0, *) {
-        return .prominent
-      } else {
-        return .done
-      }
-#else
       return .done
-#endif
     }
   }
 }

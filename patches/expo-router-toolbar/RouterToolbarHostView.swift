@@ -80,16 +80,7 @@ class RouterToolbarHostView: RouterViewWithLogger, LinkPreviewMenuUpdatable {
             )
             // Otherwise, the menu items will be reversed in the toolbar
             item.preferredMenuElementOrder = .fixed
-#if compiler(>=6.2)
-            if #available(iOS 26.0, *) {
-              if let hidesSharedBackground = menu.hidesSharedBackground {
-                item.hidesSharedBackground = hidesSharedBackground
-              }
-              if let sharesBackground = menu.sharesBackground {
-                item.sharesBackground = sharesBackground
-              }
-            }
-#endif
+            // Note: hidesSharedBackground and sharesBackground are iOS 26+ and omitted for Xcode 16.4 compatibility
             if let titleStyle = menu.titleStyle {
               RouterFontUtils.setTitleStyle(fromConfig: titleStyle, for: item)
             }

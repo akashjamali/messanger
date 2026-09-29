@@ -966,102 +966,39 @@ for gbase in ['node_modules/expo-glass-effect', 'ios/Pods/ExpoGlassEffect']:
                 print(f"  Fixed JS file in: {js_f}")
 
 # 16. Patch expo-router Toolbar files that use iOS 26-only APIs
-# Xcode 16.4 (Swift 5.10) cannot compile #available(iOS 26.0, *) bodies for APIs
-# that don't exist in the iOS 18.5 SDK. Must use #if compiler(>=6.2) to exclude them.
-toolbar_dir = os.path.join('node_modules', 'expo-router', 'ios', 'Toolbar')
-if os.path.exists(toolbar_dir):
-    # RouterToolbarHostView.swift: wrap hidesSharedBackground/sharesBackground block
-    host_view = os.path.join(toolbar_dir, 'RouterToolbarHostView.swift')
-    if os.path.exists(host_view):
-        c = open(host_view, 'r', encoding='utf-8').read()
-        orig = c
-        old = '            if #available(iOS 26.0, *) {\n              if let hidesSharedBackground = menu.hidesSharedBackground {'
-        new = '#if compiler(>=6.2)\n            if #available(iOS 26.0, *) {\n              if let hidesSharedBackground = menu.hidesSharedBackground {'
-        if old in c and '#if compiler(>=6.2)' not in c:
-            # find closing brace of this if block and add #endif after it
-            idx = c.index(old)
-            # find the matching closing brace after the block
-            block_end = c.index('\n            }\n            if let titleStyle', idx)
-            c = c[:idx] + new + c[idx + len(old):]
-            # now add #endif before "if let titleStyle"
-            c = c.replace(
-                '            }\n            if let titleStyle = menu.titleStyle',
-                '            }\n#endif\n            if let titleStyle = menu.titleStyle',
-                1
-            )
-        if c != orig:
-            open(host_view, 'w', encoding='utf-8').write(c)
-            print(f"  Fixed iOS 26 APIs in: {host_view}")
+# Xcode 16.4 (Swift 5.10 / iOS 18.5 SDK) does not have iOS 26 APIs.
+# Overwrite every occurrence with clean vendored files from patches/expo-router-toolbar.
+import shutil
 
-    # RouterToolbarItemView.swift: use #if compiler(>=6.2) around both iOS 26 blocks
-    item_view = os.path.join(toolbar_dir, 'RouterToolbarItemView.swift')
-    if os.path.exists(item_view):
-        c = open(item_view, 'r', encoding='utf-8').read()
-        orig = c
+repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+patch_src = os.path.join(repo_root, 'patches', 'expo-router-toolbar')
 
-        # Fix searchBar case - remove searchBarPlacementBarButtonItem usage entirely
-        old_search = """    } else if type == .searchBar {
-      guard #available(iOS 26.0, *), let controller = self.host?.findViewController() else {
-        // Check for iOS 26, should already be guarded by the JS side, so this warning will only fire if controller is nil
-        logger?.warn(
-          \"[expo-router] navigationItem.searchBarPlacementBarButtonItem not available. This is most likely a bug in expo-router.\"
-        )
-        currentBarButtonItem = nil
-        return
-      }
-      guard let navController = controller.navigationController else {
-        currentBarButtonItem = nil
-        return
-      }
-      guard navController.isNavigationBarHidden == false else {
-        logger?.warn(
-          \"[expo-router] Toolbar.SearchBarPreferredSlot should only be used when stack header is shown.\"
-        )
-        currentBarButtonItem = nil
-        return
-      }
+if os.path.isdir(patch_src):
+    toolbar_files = ['RouterToolbarHostView.swift', 'RouterToolbarItemView.swift', 'RouterToolbarModule.swift']
+    target_dirs = [
+        os.path.join(repo_root, 'node_modules', 'expo-router', 'ios', 'Toolbar'),
+        os.path.join(repo_root, 'ios', 'Pods', 'ExpoRouter', 'Toolbar'),
+    ]
+    # Check any Toolbar dir inside ios/Pods or node_modules/expo-router
+    for base in [os.path.join(repo_root, 'ios', 'Pods'), os.path.join(repo_root, 'node_modules', 'expo-router')]:
+        if os.path.isdir(base):
+            for dp, dns, fns in os.walk(base):
+                if os.path.basename(dp) == 'Toolbar':
+                    if dp not in target_dirs:
+                        target_dirs.append(dp)
 
-      item = controller.navigationItem.searchBarPlacementBarButtonItem"""
-        new_search = """    } else if type == .searchBar {
-      // searchBarPlacementBarButtonItem is iOS 26+ only — skip on iOS 18
-      logger?.warn(
-        \"[expo-router] Toolbar.SearchBarPreferredSlot requires iOS 26+. Not available on this OS version.\"
-      )
-      currentBarButtonItem = nil
-      return"""
-        if old_search in c:
-            c = c.replace(old_search, new_search)
-
-        # Wrap applyCommonProperties iOS 26 blocks in #if compiler(>=6.2)
-        old_common1 = '    if #available(iOS 26.0, *) {\n      item.hidesSharedBackground = hidesSharedBackground\n      item.sharesBackground = sharesBackground\n    }\n    item.style'
-        new_common1 = '#if compiler(>=6.2)\n    if #available(iOS 26.0, *) {\n      item.hidesSharedBackground = hidesSharedBackground\n      item.sharesBackground = sharesBackground\n    }\n#endif\n    item.style'
-        if old_common1 in c:
-            c = c.replace(old_common1, new_common1)
-
-        old_common2 = '    if #available(iOS 26.0, *) {\n      if let badgeConfig = badgeConfiguration {'
-        new_common2 = '#if compiler(>=6.2)\n    if #available(iOS 26.0, *) {\n      if let badgeConfig = badgeConfiguration {'
-        if old_common2 in c and '#if compiler(>=6.2)' not in c[c.index(old_common2)-5:c.index(old_common2)+5]:
-            # find end of the badge block
-            idx = c.index(old_common2)
-            c = c.replace(old_common2, new_common2, 1)
-            # add #endif after the closing badge block
-            c = c.replace('        item.badge = nil\n      }\n    }\n  }', '        item.badge = nil\n      }\n    }\n#endif\n  }', 1)
-
-        if c != orig:
-            open(item_view, 'w', encoding='utf-8').write(c)
-            print(f"  Fixed iOS 26 APIs in: {item_view}")
-
-    # RouterToolbarModule.swift: UIBarButtonItem.Style.prominent -> #if compiler(>=6.2)
-    module_swift = os.path.join(toolbar_dir, 'RouterToolbarModule.swift')
-    if os.path.exists(module_swift):
-        c = open(module_swift, 'r', encoding='utf-8').read()
-        orig = c
-        old_prom = '    case .prominent:\n      if #available(iOS 26.0, *) {\n        return .prominent\n      } else {\n        return .done\n      }'
-        new_prom = '    case .prominent:\n#if compiler(>=6.2)\n      if #available(iOS 26.0, *) {\n        return .prominent\n      } else {\n        return .done\n      }\n#else\n      return .done\n#endif'
-        if old_prom in c and '#if compiler' not in c:
-            c = c.replace(old_prom, new_prom)
-        if c != orig:
-            open(module_swift, 'w', encoding='utf-8').write(c)
-            print(f"  Fixed .prominent style in: {module_swift}")
+    for target in target_dirs:
+        if os.path.isdir(target):
+            for fname in toolbar_files:
+                src_f = os.path.join(patch_src, fname)
+                dst_f = os.path.join(target, fname)
+                if os.path.exists(src_f):
+                    try:
+                        shutil.copyfile(src_f, dst_f)
+                        print(f"  [patch-toolbar] Replaced: {dst_f}")
+                    except Exception as e:
+                        print(f"  [patch-toolbar error] Could not replace {dst_f}: {e}")
+else:
+    print(f"  [patch-toolbar warning] Source patch directory not found at: {patch_src}")
 
 print("Finished applying expo-modules-jsi patches.")

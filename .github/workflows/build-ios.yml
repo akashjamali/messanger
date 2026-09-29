@@ -61,22 +61,16 @@ jobs:
 
       - name: Patch expo-router Toolbar iOS 26 APIs
         run: |
-          # Use pre-patched vendored files (with #if compiler(>=6.2) guards).
-          # Overwrite both node_modules and ios/Pods locations so Xcode sees the fixed versions.
-          PATCH_DIR="patches/expo-router-toolbar"
-          for DEST in \
-            "node_modules/expo-router/ios/Toolbar" \
-            "ios/Pods/ExpoRouter/Toolbar"; do
+          python3 scripts/patch-expo-jsi.py
+          # Direct force copy to both node_modules and any Pods locations
+          for DEST in "node_modules/expo-router/ios/Toolbar" "ios/Pods/ExpoRouter/Toolbar"; do
             if [ -d "$DEST" ]; then
-              echo "Copying patched Toolbar files into: $DEST"
-              cp "$PATCH_DIR/RouterToolbarHostView.swift" "$DEST/RouterToolbarHostView.swift"
-              cp "$PATCH_DIR/RouterToolbarItemView.swift" "$DEST/RouterToolbarItemView.swift"
-              cp "$PATCH_DIR/RouterToolbarModule.swift"   "$DEST/RouterToolbarModule.swift"
-            else
-              echo "Directory not found (skipping): $DEST"
+              echo "Force copying patched Toolbar files into: $DEST"
+              cp -f patches/expo-router-toolbar/*.swift "$DEST/"
             fi
           done
-          echo "expo-router Toolbar patch complete."
+          echo "Verifying patch in node_modules/expo-router/ios/Toolbar/RouterToolbarHostView.swift:"
+          grep -n "hidesSharedBackground" node_modules/expo-router/ios/Toolbar/RouterToolbarHostView.swift || echo "SUCCESS: No hidesSharedBackground found!"
 
       - name: Prebuild ExpoModulesJSI xcframework
         run: |
@@ -101,6 +95,7 @@ jobs:
           echo "Building workspace: $WORKSPACE  scheme: $SCHEME"
 
           python3 ../scripts/patch-expo-jsi.py
+          cp -f ../patches/expo-router-toolbar/*.swift ../node_modules/expo-router/ios/Toolbar/ || true
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
