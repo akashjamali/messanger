@@ -71,6 +71,7 @@ jobs:
           ls -lh ios/main.jsbundle
 
       - name: Build iOS app with Xcode
+        timeout-minutes: 60
         working-directory: ios
         run: |
           set -o pipefail
@@ -91,9 +92,12 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            ONLY_ACTIVE_ARCH=NO \
             build 2>&1 | tee xcodebuild.log || {
               echo "==================== BUILD FAILED: DETAILED COMPILER ERRORS ===================="
-              grep -C 3 -E "(error:|fatal error:)" xcodebuild.log || tail -n 100 xcodebuild.log
+              grep -n -E "(error:|fatal error:|linker command failed|undefined symbol|build error)" xcodebuild.log | tail -n 60
+              echo "==================== LAST 150 LINES OF BUILD LOG ===================="
+              tail -n 150 xcodebuild.log
               exit 1
             }
 
@@ -133,8 +137,17 @@ jobs:
           echo "IPA created successfully: $(ls -lh LiquidGlassChat.ipa)"
 
       - name: Upload IPA Artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: LiquidGlassChat-iOS-IPA
           path: ios/LiquidGlassChat.ipa
           retention-days: 7
+
+      - name: Upload xcodebuild log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-failure-log
+          path: ios/xcodebuild.log
+          retention-days: 3
