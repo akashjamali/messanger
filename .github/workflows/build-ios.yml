@@ -1,14 +1,15 @@
-name: Build iOS (.ipa)
+name: Build iOS IPA
 
 on:
   push:
-    branches: [main]
+    branches: [ master, main ]
   workflow_dispatch:
 
 jobs:
-  build-ios:
-    name: EAS Build iOS
-    runs-on: ubuntu-latest
+  build:
+    name: Build iOS IPA
+    runs-on: macos-15
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -19,22 +20,121 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Setup EAS CLI
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Build iOS app
-        run: eas build --platform ios --profile preview --non-interactive
-
-      - name: Get build URL
-        if: success()
+      - name: Ensure Node symlinks for Xcode build phases
         run: |
-          echo "✅ Build submitted to EAS!"
-          echo "Check your build status at: https://expo.dev/accounts/YOUR_ACCOUNT/projects/liquid-glass-chat-ui/builds"
-          echo ""
-          echo "Once complete, download the .ipa from the EAS dashboard."
+          sudo ln -sf $(which node) /usr/local/bin/node
+          sudo ln -sf $(which node) /opt/homebrew/bin/node || true
+          echo "Node at: $(which node)"
+          node -v
+
+      - name: Install dependencies
+        run: npm ci || npm install --legacy-peer-deps
+
+      - name: Select Xcode
+        run: |
+          if [ -d "/Applications/Xcode_16.4.app" ]; then
+            sudo xcode-select -s /Applications/Xcode_16.4.app
+          fi
+          sudo xcodebuild -runFirstLaunch || true
+
+      - name: Show Xcode & Swift version
+        run: |
+          xcodebuild -version
+          xcrun swift --version
+          xcodebuild -showsdks
+
+      - name: Patch ExpoModulesJSI for Swift 6
+        run: |
+          python3 scripts/patch-expo-jsi.py
+          chmod -R +x node_modules/expo-modules-jsi/apple/scripts/ || true
+          python3 -c "p = 'node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh'; c = open(p).read().replace('-quiet', ''); open(p, 'w').write(c)" || true
+
+      - name: Run Expo Prebuild
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Re-apply patches after prebuild
+        run: |
+          python3 scripts/patch-expo-jsi.py
+
+      - name: Install CocoaPods
+        run: npx pod-install ios
+
+      - name: Prebuild ExpoModulesJSI xcframework
+        run: |
+          python3 scripts/patch-expo-jsi.py
+          PODS_ROOT="$PWD/ios/Pods" RN_ROOT="$PWD/node_modules/react-native" PLATFORM_NAME="iphoneos" bash node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh
+
+      - name: Pre-bundle JavaScript & Assets
+        run: |
+          mkdir -p ios/assets
+          npx expo export:embed --platform ios --dev false --entry-file node_modules/expo-router/entry.js --bundle-output ios/main.jsbundle --assets-dest ios
+          ls -lh ios/main.jsbundle
+
+      - name: Build iOS app with Xcode
+        working-directory: ios
+        run: |
+          set -o pipefail
+
+          # Detect workspace and scheme names dynamically
+          WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
+          SCHEME=$(echo "$WORKSPACE" | sed 's/.xcworkspace//')
+          echo "Building workspace: $WORKSPACE  scheme: $SCHEME"
+
+          python3 ../scripts/patch-expo-jsi.py
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee xcodebuild.log || {
+              echo "==================== BUILD FAILED: DETAILED COMPILER ERRORS ===================="
+              grep -C 3 -E "(error:|fatal error:)" xcodebuild.log || tail -n 100 xcodebuild.log
+              exit 1
+            }
+
+      - name: Package .ipa with Embedded JS Bundle
+        working-directory: ios
+        run: |
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -maxdepth 1 | head -n 1)
+          echo "Found app at: $APP_PATH"
+          
+          # 1. Guarantee main.jsbundle is embedded in app root
+          if [ ! -f "$APP_PATH/main.jsbundle" ]; then
+            echo "Copying pre-built main.jsbundle into app bundle..."
+            cp -v main.jsbundle "$APP_PATH/main.jsbundle"
+          fi
+          echo "App bundle contains main.jsbundle: $(ls -lh "$APP_PATH/main.jsbundle")"
+          
+          # 2. Copy bundled assets into app
+          if [ -d "assets" ]; then
+            cp -R assets "$APP_PATH/" || true
+          fi
+          
+          # 3. Clean all AppleDouble resource files and extended attributes
+          find "$APP_PATH" -name "._*" -delete || true
+          find "$APP_PATH" -name ".DS_Store" -delete || true
+          xattr -cr "$APP_PATH" || true
+          
+          # 4. Prepare clean Payload for sideloading
+          rm -rf Payload LiquidGlassChat.ipa
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          find Payload -name "._*" -delete || true
+          find Payload -name ".DS_Store" -delete || true
+          xattr -cr Payload || true
+          
+          # 5. Create the IPA ready for Sideloadly / AltStore / Scarlet / TrollStore
+          zip -r -y LiquidGlassChat.ipa Payload
+          echo "IPA created successfully: $(ls -lh LiquidGlassChat.ipa)"
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiquidGlassChat-iOS-IPA
+          path: ios/LiquidGlassChat.ipa
+          retention-days: 7

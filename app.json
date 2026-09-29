@@ -14,6 +14,13 @@
         "ITSAppUsesNonExemptEncryption": false,
         "CADisableMinimumFrameDurationOnPhone": true,
         "NSContactsUsageDescription": "Liquid Glass Chat needs access to your contacts to show your conversations.",
+        "NSLocalNetworkUsageDescription": "This app requires local network access to connect to your MiFi router.",
+        "NSCameraUsageDescription": "Used for profile picture customization.",
+        "NSPhotoLibraryUsageDescription": "Used to select contact profile photos.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true,
+          "NSAllowsArbitraryLoads": true
+        },
         "UIBackgroundModes": ["fetch", "remote-notification"]
       }
     },
