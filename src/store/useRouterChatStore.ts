@@ -72,6 +72,7 @@ export const useRouterChatStore = create<RouterChatState>((set, get) => ({
   lastSyncTime: initialCachedMessages.length > 0 ? Date.now() : null,
   error: null,
   notifiedMessageIds: getStoredNotifiedIds(),
+  activeChatId: null,
   setActiveChatId: (chatId: string | null) => {
     if (get().activeChatId === chatId) return;
     set({ activeChatId: chatId });
