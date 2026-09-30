@@ -59,4 +59,8 @@ export interface RouterChatState {
     activeChatId?: string | null,
   ) => void;
   deleteThreads: (chatIds: string[]) => Promise<void>;
+  updateOrAddMessages: (
+    fetchedMessages: SMSMessage[],
+    currentChatId?: string,
+  ) => void;
 }

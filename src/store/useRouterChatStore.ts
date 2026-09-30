@@ -463,6 +463,142 @@ export const useRouterChatStore = create<RouterChatState>((set, get) => ({
     });
   },
 
+  updateOrAddMessages: (
+    fetchedMessages: SMSMessage[],
+    currentChatId?: string,
+  ) => {
+    set((state) => {
+      const currentMessages = [...state.messages];
+      const pending = { ...state.pendingMessages };
+
+      fetchedMessages.forEach((incomingMsg) => {
+        const parsedTime =
+          incomingMsg.timestamp ?? parseSMSTimestampMillis(incomingMsg.date);
+        const trimmedContent = incomingMsg.content.trim();
+        const coreNum = getCorePhoneDigits(incomingMsg.number);
+        const normalizedChatId =
+          incomingMsg.chatId ||
+          (currentChatId
+            ? generateNormalizedChatId(currentChatId)
+            : generateNormalizedChatId(incomingMsg.number));
+
+        const isSentMsg =
+          incomingMsg.fromMe ||
+          incomingMsg.isMe === true ||
+          incomingMsg.tag === "2" ||
+          incomingMsg.tag === "3" ||
+          chatCache.isSentMessage(
+            incomingMsg.number,
+            trimmedContent,
+            incomingMsg.tag,
+          ) ||
+          chatCache.isSentId(incomingMsg.id);
+
+        // 1. Primary Check: Does the exact ID already exist?
+        const existingIndexById = currentMessages.findIndex(
+          (m) => m.id === incomingMsg.id,
+        );
+
+        if (existingIndexById > -1) {
+          currentMessages[existingIndexById] = {
+            ...currentMessages[existingIndexById],
+            ...incomingMsg,
+            chatId: normalizedChatId,
+            timestamp: parsedTime,
+            fromMe: isSentMsg,
+            isMe: isSentMsg,
+            status: isSentMsg
+              ? "sent"
+              : currentMessages[existingIndexById].status,
+          };
+          return;
+        }
+
+        // 2. Secondary Check (The Duplication Fix): Does an optimistic sent message match?
+        // Match criteria: It is a sent message, content matches exactly, and it was sent within ~60 seconds (or is a temp ID).
+        if (isSentMsg) {
+          const existingOptimisticIndex = currentMessages.findIndex((m) => {
+            const mIsSent = m.isMe || m.fromMe;
+            if (!mIsSent) return false;
+            if (m.content.trim() !== trimmedContent) return false;
+
+            const sameNum =
+              getCorePhoneDigits(m.number) === coreNum ||
+              (m.chatId && m.chatId === normalizedChatId) ||
+              m.number === incomingMsg.number;
+            if (!sameNum) return false;
+
+            const isTempId =
+              m.id.startsWith("sms-out-") ||
+              m.id.startsWith("local-") ||
+              Boolean(pending[m.id]);
+            const timeDiff = Math.abs((m.timestamp ?? 0) - parsedTime);
+            return isTempId || timeDiff < 60000;
+          });
+
+          if (existingOptimisticIndex > -1) {
+            // We found the optimistic echo!
+            const oldId = currentMessages[existingOptimisticIndex].id;
+            if (pending[oldId]) {
+              delete pending[oldId];
+            }
+            // Update its ID to the permanent router ID to prevent future dupes, and correct the timestamp.
+            currentMessages[existingOptimisticIndex] = {
+              ...currentMessages[existingOptimisticIndex],
+              ...incomingMsg,
+              id: incomingMsg.id,
+              chatId: normalizedChatId,
+              timestamp: parsedTime,
+              status: "sent",
+              fromMe: true,
+              isMe: true,
+            };
+            chatCache.recordSentMessage(
+              incomingMsg.number,
+              trimmedContent,
+              incomingMsg.id,
+            );
+            return; // Skip adding a new bubble
+          }
+        }
+
+        // Prevent echo: Discard incoming message that mirrors our own sent message within 60s
+        const isEchoOfOurSent = currentMessages.some(
+          (m) =>
+            (m.fromMe || m.isMe) &&
+            getCorePhoneDigits(m.number) === coreNum &&
+            m.content.trim() === trimmedContent &&
+            Math.abs((m.timestamp ?? 0) - parsedTime) < 60000,
+        );
+        if (isEchoOfOurSent) {
+          return; // DISCARD ECHO
+        }
+
+        // 3. If it passes all checks, it is truly a new message. Add it.
+        currentMessages.push({
+          ...incomingMsg,
+          chatId: normalizedChatId,
+          fromMe: isSentMsg,
+          isMe: isSentMsg,
+          timestamp: parsedTime,
+          status: isSentMsg ? "sent" : incomingMsg.status,
+        });
+      });
+
+      // Ensure strict chronological sorting (Descending: newest on top for inbox/store)
+      currentMessages.sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
+
+      // Save to persistent MMKV cache
+      chatCache.saveCachedMessages(currentMessages);
+
+      return {
+        messages: currentMessages,
+        pendingMessages: pending,
+        lastSyncTime: Date.now(),
+      };
+    });
+  },
+
   addMessages: (newMessages: SMSMessage[]) => {
     // Check if this is the very first time messages are loaded into the store
     const isInitialLoad =
@@ -490,97 +626,8 @@ export const useRouterChatStore = create<RouterChatState>((set, get) => ({
       }
     }
 
-    set((state) => {
-      const currentMessages = [...state.messages];
-      const existingIds = new Set(currentMessages.map((m) => m.id));
-
-      for (const fetchedMsg of newMessages) {
-        const parsedTime =
-          fetchedMsg.timestamp ?? parseSMSTimestampMillis(fetchedMsg.date);
-        const trimmedContent = fetchedMsg.content.trim();
-        const coreNum = getCorePhoneDigits(fetchedMsg.number);
-
-        // 1. ECHO FIX & OPTIMISTIC MERGE:
-        // Check if this is a message we already sent optimistically
-        const optimisticIndex = currentMessages.findIndex((m) => {
-          if (!m.fromMe) return false;
-          const sameNum =
-            getCorePhoneDigits(m.number) === coreNum ||
-            m.number === fetchedMsg.number;
-          const sameContent = m.content.trim() === trimmedContent;
-          const timeDiff = Math.abs((m.timestamp ?? 0) - parsedTime);
-          return sameNum && sameContent && timeDiff < 180000;
-        });
-
-        if (optimisticIndex !== -1) {
-          // Merge by updating status and recording sent signature
-          const opt = currentMessages[optimisticIndex];
-          currentMessages[optimisticIndex] = {
-            ...opt,
-            status: "sent",
-          };
-          chatCache.recordSentMessage(
-            fetchedMsg.number,
-            trimmedContent,
-            fetchedMsg.id,
-          );
-          // Discard fetched duplicate copy
-          continue;
-        }
-
-        // Determine if it is a sent message from the router or our cache
-        const isSentByUs =
-          fetchedMsg.fromMe ||
-          fetchedMsg.tag === "2" ||
-          fetchedMsg.tag === "3" ||
-          chatCache.isSentMessage(
-            fetchedMsg.number,
-            trimmedContent,
-            fetchedMsg.tag,
-          );
-
-        // Check if it is an echo of our own sent message (prevent duplicate incoming bubbles)
-        const isEchoOfOurSent = currentMessages.some(
-          (m) =>
-            m.fromMe &&
-            getCorePhoneDigits(m.number) === coreNum &&
-            m.content.trim() === trimmedContent &&
-            Math.abs((m.timestamp ?? 0) - parsedTime) < 180000,
-        );
-        if (isEchoOfOurSent) {
-          continue; // DISCARD ECHO
-        }
-
-        // Standard deduplication by message ID
-        if (existingIds.has(fetchedMsg.id)) {
-          continue;
-        }
-
-        existingIds.add(fetchedMsg.id);
-        const normalizedChatId =
-          fetchedMsg.chatId || generateNormalizedChatId(fetchedMsg.number);
-        currentMessages.push({
-          ...fetchedMsg,
-          chatId: normalizedChatId,
-          fromMe: isSentByUs,
-          isMe: isSentByUs,
-          timestamp: parsedTime,
-        });
-      }
-
-      // 2. SORTING FIX: Enforce strict mathematical chronological order (Descending for inbox)
-      currentMessages.sort(
-        (a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0),
-      );
-
-      // Save to persistent MMKV cache
-      chatCache.saveCachedMessages(currentMessages);
-
-      return {
-        messages: currentMessages,
-        lastSyncTime: Date.now(),
-      };
-    });
+    // Run strict reconciliation and deduplication on router messages
+    get().updateOrAddMessages(newMessages);
 
     // Synchronize to Fable threads
     loadDeviceContacts().then((contacts) => {
@@ -607,7 +654,7 @@ export const useRouterChatStore = create<RouterChatState>((set, get) => ({
             (m) =>
               (m.from === "me" || m.isMe === true) &&
               m.text.trim() === trimmedContent &&
-              Math.abs((m.timestamp ?? 0) - parsedTime) < 180000,
+              Math.abs((m.timestamp ?? 0) - parsedTime) < 60000,
           );
 
         // DISCARD ECHO: Never add our own sent text as an incoming bubble!

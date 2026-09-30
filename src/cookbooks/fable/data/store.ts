@@ -62,25 +62,81 @@ export const useFable = create<State>()(
           const resolvedIsMe = isMe !== undefined ? isMe : from === "me";
           const resolvedFrom: Message["from"] = resolvedIsMe ? "me" : from;
 
-          // Check if message already exists by ID or content/timestamp
-          const existingIdx = currentList.findIndex(
-            (m) =>
-              (messageId && m.id === messageId) ||
-              (m.text === trimmed &&
-                (m.id === resolvedId ||
-                  (m.timestamp && Math.abs(m.timestamp - resolvedTime) < 120000))),
-          );
+          // 1. Primary Check: Does the exact ID already exist in this thread?
+          const existingIdxById = messageId
+            ? currentList.findIndex((m) => m.id === messageId)
+            : -1;
 
-          if (existingIdx !== -1) {
-            const existing = currentList[existingIdx];
-            // If message was wrongly recorded as 'them' but incoming is 'me', correct direction
-            if (existing && resolvedIsMe && existing.from !== "me") {
+          if (existingIdxById > -1) {
+            const updatedList = [...currentList];
+            updatedList[existingIdxById] = {
+              ...updatedList[existingIdxById],
+              status: status || updatedList[existingIdxById].status || "sent",
+              from: resolvedFrom,
+              isMe: resolvedIsMe,
+              at: at || updatedList[existingIdxById].at,
+            };
+            return {
+              threads: {
+                ...state.threads,
+                [id]: updatedList,
+              },
+            };
+          }
+
+          // 2. Secondary Check (Content-Based Deduplication for Sent Messages):
+          // Match criteria: sent message, exact trimmed text, within 60-second window or temporary ID
+          if (resolvedIsMe) {
+            const existingOptimisticIndex = currentList.findIndex((m) => {
+              const isSent = m.isMe || m.from === "me";
+              if (!isSent) return false;
+              if (m.text.trim() !== trimmed) return false;
+              const isTempId =
+                m.id.startsWith("sms-out-") ||
+                m.id.startsWith("local-");
+              const timeDiff = Math.abs((m.timestamp ?? 0) - resolvedTime);
+              return isTempId || timeDiff < 60000;
+            });
+
+            if (existingOptimisticIndex > -1) {
+              // Found the optimistic echo! Reconcile permanent router ID and timestamp
               const updatedList = [...currentList];
-              updatedList[existingIdx] = {
-                ...existing,
+              updatedList[existingOptimisticIndex] = {
+                ...updatedList[existingOptimisticIndex],
+                id: messageId || updatedList[existingOptimisticIndex].id,
+                timestamp: resolvedTime,
+                at: at || updatedList[existingOptimisticIndex].at,
+                status: status || "sent",
                 from: "me",
                 isMe: true,
-                status: status || existing.status || "sent",
+              };
+              updatedList.sort(
+                (a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0),
+              );
+              return {
+                threads: {
+                  ...state.threads,
+                  [id]: updatedList,
+                },
+              };
+            }
+          }
+
+          // 3. Secondary Check for incoming ('them') messages:
+          if (!resolvedIsMe) {
+            const existingThemIndex = currentList.findIndex(
+              (m) =>
+                (!m.isMe && m.from === "them") &&
+                m.text.trim() === trimmed &&
+                Math.abs((m.timestamp ?? 0) - resolvedTime) < 60000,
+            );
+            if (existingThemIndex > -1) {
+              const updatedList = [...currentList];
+              updatedList[existingThemIndex] = {
+                ...updatedList[existingThemIndex],
+                id: messageId || updatedList[existingThemIndex].id,
+                timestamp: resolvedTime,
+                at: at || updatedList[existingThemIndex].at,
               };
               return {
                 threads: {
@@ -89,9 +145,9 @@ export const useFable = create<State>()(
                 },
               };
             }
-            return state;
           }
 
+          // 4. Truly new message: Add it
           const newMsg: Message = {
             id: resolvedId,
             from: resolvedFrom,

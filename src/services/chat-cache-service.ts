@@ -236,46 +236,97 @@ class ChatCacheService {
 
       // 2. Reconcile each consolidated thread
       for (const [threadId, threadMessages] of Object.entries(consolidated)) {
-        // Deduplicate messages by id or content+timestamp
-        const seenIds = new Set<string>();
         const uniqueMsgs: any[] = [];
-        for (const msg of threadMessages) {
-          if (!msg) continue;
-          const key = msg.id || `${msg.text}:${msg.timestamp}`;
-          if (!seenIds.has(key)) {
-            seenIds.add(key);
-            uniqueMsgs.push(msg);
+
+        for (const rawMsg of threadMessages) {
+          if (!rawMsg) continue;
+          const trimmed = (rawMsg.text || "").trim();
+          const rawTime = rawMsg.timestamp ?? 0;
+          const shouldBeMe =
+            rawMsg.from === "me" ||
+            rawMsg.isMe === true ||
+            this.isSentMessage(threadId, trimmed, (rawMsg as any).tag) ||
+            this.isSentId(rawMsg.id);
+
+          const normalizedMsg = {
+            ...rawMsg,
+            from: (shouldBeMe ? "me" : "them") as "me" | "them",
+            isMe: shouldBeMe,
+            status: shouldBeMe ? (rawMsg.status || "sent") : rawMsg.status,
+          };
+
+          // 1. Check if exact ID already in uniqueMsgs
+          const existingByIdIndex = rawMsg.id
+            ? uniqueMsgs.findIndex((u) => u.id === rawMsg.id)
+            : -1;
+
+          if (existingByIdIndex > -1) {
+            uniqueMsgs[existingByIdIndex] = {
+              ...uniqueMsgs[existingByIdIndex],
+              ...normalizedMsg,
+            };
+            continue;
           }
+
+          // 2. Content-Based Deduplication (The Fix):
+          // If sent message, match against existing sent messages with same content within 60s
+          if (shouldBeMe) {
+            const existingSentIndex = uniqueMsgs.findIndex((u) => {
+              if (u.from !== "me" && !u.isMe) return false;
+              if ((u.text || "").trim() !== trimmed) return false;
+              const isTemp =
+                u.id?.startsWith("sms-out-") ||
+                u.id?.startsWith("local-") ||
+                rawMsg.id?.startsWith("sms-out-") ||
+                rawMsg.id?.startsWith("local-");
+              const timeDiff = Math.abs((u.timestamp ?? 0) - rawTime);
+              return isTemp || timeDiff < 60000;
+            });
+
+            if (existingSentIndex > -1) {
+              hasChanges = true;
+              const existing = uniqueMsgs[existingSentIndex];
+              const preferRawId =
+                (existing.id?.startsWith("sms-out-") ||
+                  existing.id?.startsWith("local-")) &&
+                rawMsg.id &&
+                !rawMsg.id.startsWith("sms-out-") &&
+                !rawMsg.id.startsWith("local-");
+
+              uniqueMsgs[existingSentIndex] = {
+                ...existing,
+                ...normalizedMsg,
+                id: preferRawId ? rawMsg.id : existing.id,
+                timestamp: preferRawId
+                  ? rawTime
+                  : existing.timestamp || rawTime,
+                status: "sent",
+                from: "me",
+                isMe: true,
+              };
+              continue;
+            }
+          }
+
+          // 3. Prevent incoming echo of our own sent text
+          if (!shouldBeMe) {
+            const isEchoOfSent = uniqueMsgs.some(
+              (u) =>
+                (u.from === "me" || u.isMe) &&
+                (u.text || "").trim() === trimmed &&
+                Math.abs((u.timestamp ?? 0) - rawTime) < 60000,
+            );
+            if (isEchoOfSent) {
+              hasChanges = true;
+              continue; // Drop incoming echo
+            }
+          }
+
+          uniqueMsgs.push(normalizedMsg);
         }
 
-        const nextMsgs = uniqueMsgs.map((msg) => {
-          const trimmed = (msg.text || "").trim();
-          const shouldBeMe =
-            msg.from === "me" ||
-            msg.isMe === true ||
-            this.isSentMessage(threadId, trimmed, (msg as any).tag) ||
-            this.isSentId(msg.id);
-
-          if (shouldBeMe) {
-            if (msg.from !== "me" || !msg.isMe) {
-              hasChanges = true;
-            }
-            return {
-              ...msg,
-              from: "me" as const,
-              isMe: true,
-              status: msg.status || "sent",
-            };
-          }
-          return {
-            ...msg,
-            from: "them" as const,
-            isMe: false,
-          };
-        });
-
-        nextMsgs.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-        updatedThreads[threadId] = nextMsgs;
+        uniqueMsgs.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+        updatedThreads[threadId] = uniqueMsgs;
       }
 
       // Check if thread keys changed

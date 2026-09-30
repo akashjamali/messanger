@@ -21,7 +21,8 @@
           "NSAllowsLocalNetworking": true,
           "NSAllowsArbitraryLoads": true
         },
-        "UIBackgroundModes": ["fetch", "remote-notification"]
+        "UIBackgroundModes": ["fetch", "remote-notification", "processing"],
+        "BGTaskSchedulerPermittedIdentifiers": ["BACKGROUND_SMS_FETCH_TASK"]
       }
     },
     "plugins": [
@@ -48,6 +49,14 @@
         {
           "ios": {
             "deploymentTarget": "26.0"
+          }
+        }
+      ],
+      [
+        "expo-background-fetch",
+        {
+          "backgroundFetch": {
+            "minimumInterval": 60
           }
         }
       ],

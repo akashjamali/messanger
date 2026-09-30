@@ -1,10 +1,12 @@
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import * as Network from "expo-network";
+import * as BackgroundFetch from "expo-background-fetch";
 import { SymbolView, type SFSymbol } from "expo-symbols";
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Linking,
   Pressable,
   ScrollView,
   Text,
@@ -36,6 +38,10 @@ export default function Settings() {
 
   const [page, setPage] = useState<"settings" | "connections">("settings");
   const [modalVisible, setModalVisible] = useState(false);
+
+  // Background App Refresh status for the notification health banner
+  const [bgFetchStatus, setBgFetchStatus] =
+    useState<BackgroundFetch.BackgroundFetchStatus | null>(null);
 
   const [networkInfo, setNetworkInfo] = useState<{
     name: string;
@@ -87,7 +93,17 @@ export default function Settings() {
       }
     }
 
+    async function checkBgRefreshStatus() {
+      try {
+        const status = await BackgroundFetch.getStatusAsync();
+        if (active) setBgFetchStatus(status);
+      } catch {
+        // Not available in Expo Go or unsupported environments
+      }
+    }
+
     void updateNetwork();
+    void checkBgRefreshStatus();
 
     return () => {
       active = false;
@@ -534,6 +550,99 @@ export default function Settings() {
           </Pressable>
         ))}
       </Glass>
+
+      {/* Background App Refresh health banner — iOS only */}
+      {bgFetchStatus !== null &&
+        bgFetchStatus !== BackgroundFetch.BackgroundFetchStatus.Available && (
+          <>
+            <Text
+              style={{
+                fontSize: 13,
+                color: theme.secondary,
+                marginTop: 28,
+                marginBottom: 12,
+              }}
+            >
+              NOTIFICATIONS
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Enable Background App Refresh"
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                Alert.alert(
+                  "Background App Refresh Disabled",
+                  "To receive SMS notifications when the app is closed, enable Background App Refresh in Settings → General → Background App Refresh → Liquid Glass Chat.",
+                  [
+                    { text: "Later", style: "cancel" },
+                    {
+                      text: "Open Settings",
+                      onPress: () =>
+                        Linking.openURL("app-settings:").catch(() =>
+                          Linking.openURL("App-Prefs:BACKGROUND_APP_REFRESH"),
+                        ),
+                    },
+                  ],
+                );
+              }}
+              style={({ pressed }) => ({
+                borderRadius: 20,
+                backgroundColor: pressed
+                  ? theme.rowPressed
+                  : "rgba(255, 149, 0, 0.12)",
+                borderWidth: 1,
+                borderColor: "rgba(255, 149, 0, 0.35)",
+                padding: 16,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 12,
+              })}
+            >
+              <View
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  backgroundColor: "rgba(255, 149, 0, 0.18)",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <SymbolView
+                  name="bell.badge.slash"
+                  size={18}
+                  tintColor="#FF9500"
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontSize: 14,
+                    fontWeight: "600",
+                    color: "#FF9500",
+                    marginBottom: 2,
+                  }}
+                >
+                  Background Refresh Disabled
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: theme.secondary,
+                    lineHeight: 17,
+                  }}
+                >
+                  Tap to enable so you receive messages when the app is closed.
+                </Text>
+              </View>
+              <SymbolView
+                name="chevron.right"
+                size={14}
+                tintColor={"#FF9500"}
+              />
+            </Pressable>
+          </>
+        )}
 
       {/* Connection Menu Item - Positioned exactly below Appearance */}
       <Text style={{ fontSize: 13, color: theme.secondary, marginTop: 28, marginBottom: 12 }}>

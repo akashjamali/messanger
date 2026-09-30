@@ -14,7 +14,10 @@ import {
   requestNotificationPermissions,
   setupNotificationResponseListener,
 } from "../services/notification-service";
-import { registerBackgroundSMSFetchAsync } from "../services/background-sms-task";
+import {
+  registerBackgroundSMSFetchAsync,
+  attachBackgroundTaskLifecycleListener,
+} from "../services/background-sms-task";
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -30,6 +33,8 @@ export const unstable_settings = { initialRouteName: "index" };
 
 export default function RootLayout() {
   const [ready, setReady] = useState(false);
+
+  // Preload avatar assets before hiding splash screen
   useEffect(() => {
     let mounted = true;
     const preload =
@@ -41,26 +46,50 @@ export default function RootLayout() {
       mounted = false;
     };
   }, []);
+
   useEffect(() => {
     if (ready) void SplashScreen.hideAsync();
   }, [ready]);
 
+  // ── Notification & Background Task Setup ──────────────────────────────────
+  // This runs once on mount. Order matters:
+  // 1. Request notification permissions first (user sees the system dialog)
+  // 2. Register the background fetch task with the OS
+  // 3. Attach the AppState listener that re-verifies registration on backgrounding
+  // 4. Set up the notification tap → deep link handler
   useEffect(() => {
+    // 1. Request notification permissions
     void requestNotificationPermissions();
+
+    // 2. Register the background SMS fetch task with the OS BGTaskScheduler
     void registerBackgroundSMSFetchAsync();
-    const cleanup = setupNotificationResponseListener((chatId) => {
-      try {
-        router.push({
-          pathname: "/fable/chat/[id]",
-          params: { id: chatId },
-        });
-      } catch (err) {
-        console.error("Deep link from notification failed:", err);
-      }
-    });
-    return cleanup;
+
+    // 3. Re-verify task registration when app moves to background.
+    //    iOS can silently drop task registrations after force-quit / memory pressure.
+    const detachLifecycle = attachBackgroundTaskLifecycleListener();
+
+    // 4. Handle notification taps → navigate to the correct chat thread
+    const detachNotificationListener = setupNotificationResponseListener(
+      (chatId) => {
+        try {
+          router.push({
+            pathname: "/fable/chat/[id]",
+            params: { id: chatId },
+          });
+        } catch (err) {
+          console.error("[Layout] Deep link from notification failed:", err);
+        }
+      },
+    );
+
+    return () => {
+      detachLifecycle();
+      detachNotificationListener();
+    };
   }, []);
+
   if (!ready) return null;
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
