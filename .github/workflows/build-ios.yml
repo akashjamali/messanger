@@ -59,7 +59,7 @@ jobs:
       - name: Install CocoaPods
         run: npx pod-install ios
 
-      - name: Patch expo-router Toolbar iOS 26 APIs
+      - name: Patch iOS 26 APIs (expo-router Toolbar & expo-image-picker)
         run: |
           python3 scripts/patch-expo-jsi.py
           # Direct force copy to both node_modules and any Pods locations
@@ -69,8 +69,16 @@ jobs:
               cp -f patches/expo-router-toolbar/*.swift "$DEST/"
             fi
           done
+          for DEST in "node_modules/expo-image-picker/ios" "ios/Pods/ExpoImagePicker"; do
+            if [ -d "$DEST" ]; then
+              echo "Force copying patched MediaHandler.swift into: $DEST"
+              cp -f patches/expo-image-picker/MediaHandler.swift "$DEST/"
+            fi
+          done
           echo "Verifying patch in node_modules/expo-router/ios/Toolbar/RouterToolbarHostView.swift:"
           grep -n "hidesSharedBackground" node_modules/expo-router/ios/Toolbar/RouterToolbarHostView.swift || echo "SUCCESS: No hidesSharedBackground found!"
+          echo "Verifying patch in node_modules/expo-image-picker/ios/MediaHandler.swift:"
+          grep -n "contentType" node_modules/expo-image-picker/ios/MediaHandler.swift || echo "SUCCESS: No contentType found!"
 
       - name: Prebuild ExpoModulesJSI xcframework
         run: |
@@ -96,6 +104,8 @@ jobs:
 
           python3 ../scripts/patch-expo-jsi.py
           cp -f ../patches/expo-router-toolbar/*.swift ../node_modules/expo-router/ios/Toolbar/ || true
+          cp -f ../patches/expo-image-picker/MediaHandler.swift ../node_modules/expo-image-picker/ios/ || true
+          cp -f ../patches/expo-image-picker/MediaHandler.swift Pods/ExpoImagePicker/ || true
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \

@@ -1001,4 +1001,29 @@ if os.path.isdir(patch_src):
 else:
     print(f"  [patch-toolbar warning] Source patch directory not found at: {patch_src}")
 
+# 17. Patch expo-image-picker MediaHandler.swift that uses iOS 26-only PHAsset.contentType
+image_picker_patch_src = os.path.join(repo_root, 'patches', 'expo-image-picker', 'MediaHandler.swift')
+if os.path.exists(image_picker_patch_src):
+    for base_p in [
+        os.path.join(repo_root, 'node_modules', 'expo-image-picker', 'ios', 'MediaHandler.swift'),
+        os.path.join(repo_root, 'ios', 'Pods', 'ExpoImagePicker', 'MediaHandler.swift')
+    ]:
+        if os.path.exists(base_p):
+            try:
+                shutil.copyfile(image_picker_patch_src, base_p)
+                print(f"  [patch-image-picker] Replaced: {base_p}")
+            except Exception as e:
+                print(f"  [patch-image-picker error] Could not replace {base_p}: {e}")
+    # Also check any MediaHandler.swift inside ios/Pods
+    pods_dir = os.path.join(repo_root, 'ios', 'Pods')
+    if os.path.isdir(pods_dir):
+        for dp, dns, fns in os.walk(pods_dir):
+            if 'MediaHandler.swift' in fns:
+                t_path = os.path.join(dp, 'MediaHandler.swift')
+                try:
+                    shutil.copyfile(image_picker_patch_src, t_path)
+                    print(f"  [patch-image-picker] Replaced in Pods: {t_path}")
+                except Exception as e:
+                    print(f"  [patch-image-picker error] Could not replace {t_path}: {e}")
+
 print("Finished applying expo-modules-jsi patches.")
